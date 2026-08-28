@@ -1,0 +1,32 @@
+﻿# build output
+out/
+target/
+build/
+bin/
+*.class
+*.jar
+!**/maven-wrapper.jar
+
+# IDE (machine-specific — this is what breaks projects when moved)
+.idea/
+*.iml
+.vscode/
+nbproject/private/
+.settings/
+.classpath
+.project
+
+# dependencies (regenerate with npm install)
+node_modules/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# os / media
+Thumbs.db
+Desktop.ini
+*.mp4
+*.mkv

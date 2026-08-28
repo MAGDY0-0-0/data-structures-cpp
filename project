@@ -1,0 +1,269 @@
+// ============================================================
+//  stack_expression.cpp
+//  Demonstrates TWO classic stack algorithms:
+//    1. Infix  → Postfix  (Shunting-Yard algorithm)
+//    2. Postfix Evaluation
+//
+//  Supports: multi-digit numbers, +  -  *  /  ^  ( )
+//  Right-associativity of ^ is handled correctly.
+// ============================================================
+
+#include <iostream> // cout
+#include <stack>    // std::stack
+#include <string>   // std::string, std::stoi
+#include <sstream>  // std::istringstream  (for splitting postfix tokens)
+#include <cctype>   // isdigit()
+#include <cmath>    // pow()
+
+using namespace std;
+
+// ============================================================
+//  HELPER: getPrecedence
+//  Returns a numeric precedence level for an operator.
+//  Higher number = binds more tightly.
+//
+//    ^  →  3   (highest)
+//    *  /  →  2
+//    +  -  →  1   (lowest)
+// ============================================================
+int getPrecedence(char op)
+{
+    if (op == '^')
+        return 3;
+    if (op == '*' || op == '/')
+        return 2;
+    if (op == '+' || op == '-')
+        return 1;
+    return 0; // '(' and anything else → lowest possible
+}
+
+// ============================================================
+//  PART 1: infixToPostfix
+//
+//  Converts an infix expression string into a postfix
+//  (Reverse Polish Notation) string using a character stack.
+//
+//  Algorithm (Shunting-Yard):
+//  ─────────────────────────
+//  • Numbers   → append directly to output (collect all digits first)
+//  • '('       → push onto the operator stack
+//  • ')'       → pop & output until matching '(' is discarded
+//  • Operator  → pop & output higher-or-equal-precedence ops,
+//                THEN push this operator
+//                  ★ Exception: for '^' (right-associative) we only
+//                    pop strictly-higher-precedence ops, so two
+//                    consecutive '^' are NOT popped (they stay
+//                    stacked and evaluated right-to-left).
+//  • End       → pop & output everything remaining on the stack
+// ============================================================
+string infixToPostfix(const string &infix)
+{
+    stack<char> opStack; // holds operators and '('
+    string postfix;      // the output string being built
+
+    for (int i = 0; i < (int)infix.size(); ++i)
+    {
+        char ch = infix[i];
+
+        // ── Skip whitespace ──────────────────────────────────
+        if (ch == ' ')
+            continue;
+
+        // ── OPERAND: digit (possibly multi-digit) ────────────
+        if (isdigit(ch))
+        {
+            // Collect ALL consecutive digits as one token
+            string num;
+            while (i < (int)infix.size() && isdigit(infix[i]))
+            {
+                num += infix[i];
+                ++i;
+            }
+            --i; // we went one step too far; the for-loop will ++i again
+
+            // Append the number to output, followed by a space
+            // (spaces are the delimiter between postfix tokens)
+            postfix += num + ' ';
+        }
+
+        // ── LEFT PARENTHESIS: always push ────────────────────
+        else if (ch == '(')
+        {
+            opStack.push(ch);
+        }
+
+        // ── RIGHT PARENTHESIS ────────────────────────────────
+        else if (ch == ')')
+        {
+            // Pop and output everything until the matching '('
+            while (!opStack.empty() && opStack.top() != '(')
+            {
+                postfix += opStack.top();
+                postfix += ' ';
+                opStack.pop();
+            }
+            // Discard the '(' itself (it is never added to output)
+            if (!opStack.empty())
+                opStack.pop();
+        }
+
+        // ── OPERATOR: +  -  *  /  ^ ──────────────────────────
+        else
+        {
+            // Decide whether to pop the stack top before pushing ch.
+            // We pop when:
+            //   (a) the stack is not empty
+            //   (b) the top is not '('
+            //   (c) the top has HIGHER precedence than ch,
+            //       OR equal precedence AND ch is LEFT-associative.
+            //
+            // ★ Right-associativity of '^':
+            //   When ch == '^', we must NOT pop another '^' from the
+            //   top, because "2^3^2" must become "2 3 2 ^ ^"
+            //   (evaluated as 2^(3^2) = 2^9 = 512, not (2^3)^2 = 64).
+            //   We achieve this by requiring strictly-greater precedence
+            //   (not ≥) when ch is '^'.
+
+            while (!opStack.empty() &&
+                   opStack.top() != '(' &&
+                   (getPrecedence(opStack.top()) > getPrecedence(ch) ||
+                    (getPrecedence(opStack.top()) == getPrecedence(ch) && ch != '^')
+                    //  ↑ left-associative operators pop equal-precedence;
+                    //    '^' (right-associative) does NOT
+                    ))
+            {
+                postfix += opStack.top();
+                postfix += ' ';
+                opStack.pop();
+            }
+
+            // Push the current operator onto the stack
+            opStack.push(ch);
+        }
+    }
+
+    // ── END OF INPUT: pop everything remaining ───────────────
+    while (!opStack.empty())
+    {
+        postfix += opStack.top();
+        postfix += ' ';
+        opStack.pop();
+    }
+
+    // Trim the trailing space for clean output
+    if (!postfix.empty() && postfix.back() == ' ')
+        postfix.pop_back();
+
+    return postfix;
+}
+
+// ============================================================
+//  PART 2: evaluatePostfix
+//
+//  Evaluates a space-separated postfix expression and returns
+//  the integer result using an integer stack.
+//
+//  Algorithm:
+//  ──────────
+//  • Token is a number  → push it
+//  • Token is an operator →
+//        operand1 = pop()   ← this is the RIGHT operand
+//        operand2 = pop()   ← this is the LEFT  operand
+//        result   = operand2  <op>  operand1
+//        push result
+//  • After all tokens → the stack contains exactly ONE value,
+//    which is the final answer.
+// ============================================================
+int evaluatePostfix(const string &postfix)
+{
+    stack<int> valStack;           // holds integer operands
+    istringstream tokens(postfix); // split by whitespace automatically
+    string token;
+
+    while (tokens >> token)
+    {
+        // ── OPERAND: convert string → int and push ────────────
+        // A token is an operand when it is a digit string
+        // (we check the first character; '-' in a valid postfix
+        //  expression at the token level means "minus operator").
+        if (isdigit(token[0]))
+        {
+            valStack.push(stoi(token));
+        }
+
+        // ── OPERATOR ─────────────────────────────────────────
+        else
+        {
+            // Need at least two operands on the stack
+            int operand1 = valStack.top();
+            valStack.pop(); // RIGHT operand (top)
+            int operand2 = valStack.top();
+            valStack.pop(); // LEFT  operand
+
+            int result = 0;
+            char op = token[0];
+
+            if (op == '+')
+                result = operand2 + operand1;
+            else if (op == '-')
+                result = operand2 - operand1;
+            else if (op == '*')
+                result = operand2 * operand1;
+            else if (op == '/')
+                result = operand2 / operand1; // integer division
+            else if (op == '^')
+                result = (int)pow((double)operand2, (double)operand1);
+
+            valStack.push(result);
+        }
+    }
+
+    // The single remaining value on the stack is our answer
+    return valStack.top();
+}
+
+// ============================================================
+//  MAIN: Run three test cases and print step-by-step results
+// ============================================================
+int main()
+{
+    // ── Test data ─────────────────────────────────────────────
+    const string expressions[] = {
+        "3+4*5-2",            // Expected postfix: 3 4 5 * + 2 -   Result: 21
+        "(300+20/5)*(43-21)", // Expected postfix: 300 20 5 / + 43 21 - *   Result: 6688
+        "2^3^2"               // Expected postfix: 2 3 2 ^ ^        Result: 512
+    };
+
+    const string expectedPostfix[] = {
+        "3 4 5 * + 2 -",
+        "300 20 5 / + 43 21 - *",
+        "2 3 2 ^ ^"};
+
+    const int expectedResult[] = {21, 6688, 512};
+
+    cout << "============================================================\n";
+    cout << "   Stack-Based Expression Evaluator\n";
+    cout << "   (Infix → Postfix → Result)\n";
+    cout << "============================================================\n\n";
+
+    for (int t = 0; t < 3; ++t)
+    {
+        cout << "── Test " << t + 1 << " ──────────────────────────────────────────\n";
+        cout << "  Infix    : " << expressions[t] << "\n";
+
+        // Step 1: Convert
+        string postfix = infixToPostfix(expressions[t]);
+        cout << "  Postfix  : " << postfix << "\n";
+        cout << "  Expected : " << expectedPostfix[t] << "\n";
+        cout << "  Match?   : " << (postfix == expectedPostfix[t] ? "YES ✓" : "NO ✗") << "\n";
+
+        // Step 2: Evaluate
+        int result = evaluatePostfix(postfix);
+        cout << "  Result   : " << result << "\n";
+        cout << "  Expected : " << expectedResult[t] << "\n";
+        cout << "  Match?   : " << (result == expectedResult[t] ? "YES ✓" : "NO ✗") << "\n\n";
+    }
+
+    cout << "============================================================\n";
+    return 0;
+}
